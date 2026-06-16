@@ -1,42 +1,52 @@
-# artifact3-terraform-templates
+﻿# artifact3-terraform-templates
 
 Repositorio central de templates Terraform para el Artefacto 3.
 
-Esta versión es intencionalmente simple para prueba:
+Módulos disponibles:
 
-- Solo incluye el módulo `glue_job`.
-- No incluye carpeta `examples`.
-- No incluye validaciones pre-deploy.
-- El módulo crea uno o más AWS Glue Jobs.
-- El módulo sube el script Python del job a S3.
-- El módulo permite recibir `default_arguments` genéricos por cada job.
+- `glue_job` — Crea AWS Glue Jobs con scripts subidos a S3.
+- `athena` — Crea base de datos Glue, workgroup Athena y registra named queries desde archivos SQL.
+- `lambda` — Empaqueta código Lambda desde un directorio, lo sube a S3 y crea la función.
 
 ## Estructura
 
 ```text
 artifact3-terraform-templates/
 └── modules/
-    └── glue_job/
+    ├── glue_job/
+    │   ├── main.tf
+    │   ├── variables.tf
+    │   ├── outputs.tf
+    │   └── versions.tf
+    ├── athena/
+    │   ├── main.tf
+    │   ├── variables.tf
+    │   ├── outputs.tf
+    │   └── versions.tf
+    └── lambda/
         ├── main.tf
         ├── variables.tf
         ├── outputs.tf
         └── versions.tf
 ```
 
-## Idea
+## Uso
 
-El repo consumidor referencia este módulo como source:
+Cada módulo se referencia desde el `main.tf` del repo consumidor:
 
 ```hcl
 module "glue_jobs" {
-  source = "../artifact3-terraform-templates/modules/glue_job"
+  source = "git::https://github.com/jhonnjc15/artifact3-terraform-templates.git//modules/glue_job?ref=main"
+  ...
+}
 
-  artifact_bucket = var.artifact_bucket
-  temp_bucket     = var.temp_bucket
-  glue_role_arn   = var.glue_role_arn
-  scripts_prefix  = "glue/jobs/dev"
-  glue_jobs       = local.enabled_glue_jobs
+module "athena" {
+  source = "git::https://github.com/jhonnjc15/artifact3-terraform-templates.git//modules/athena?ref=main"
+  ...
+}
+
+module "lambda" {
+  source = "git::https://github.com/jhonnjc15/artifact3-terraform-templates.git//modules/lambda?ref=main"
+  ...
 }
 ```
-
-Para usarlo desde GitHub Actions, el workflow del repo consumidor hace checkout de ambos repos en carpetas hermanas.
