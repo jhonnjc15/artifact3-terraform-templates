@@ -15,7 +15,7 @@ resource "aws_s3_object" "glue_script" {
   for_each = var.glue_jobs
 
   bucket = var.artifact_bucket
-  key    = "${local.clean_scripts_prefix}/${each.key}/${basename(each.value.script_local_path)}"
+  key = try(each.value.script_s3_key, "${local.clean_scripts_prefix}/${each.key}/${basename(each.value.script_local_path)}")
   source = each.value.script_local_path
   etag   = filemd5(each.value.script_local_path)
 
