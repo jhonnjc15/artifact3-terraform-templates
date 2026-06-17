@@ -88,9 +88,9 @@ locals {
   final_partition_keys = local.operation == "ALTER" ? concat(local.existing_parts, local.parts_to_add) : local.partition_keys
 }
 
-# Base de datos (solo para CREATE)
+# Base de datos (siempre activa si enabled, no depende de CREATE/ALTER)
 resource "aws_glue_catalog_database" "this" {
-  count = try(var.athena.enabled, false) && local.operation == "CREATE" ? 1 : 0
+  count = try(var.athena.enabled, false) ? 1 : 0
 
   name        = local.database_name
   description = local.description
