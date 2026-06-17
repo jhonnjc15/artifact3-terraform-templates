@@ -29,7 +29,7 @@ locals {
   output_format = try(regex("(?i)OUTPUTFORMAT\\s+'([^']+)'", local.sql_content)[0], "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat")
 
   # Parsear columnas del SQL (aplica tanto para CREATE como ALTER)
-  columns_block = try(regex("(?si)\\(\\s*(.+?)\\s*\\)\\s*(?:PARTITIONED|ROW|STORED|LOCATION|TBLPROPERTIES)", local.sql_content)[0], "")
+  columns_block = try(regex("(?si)\\(\\s*(.+?)\\s*\\)\\s*(?:PARTITIONED|ROW|STORED|LOCATION|TBLPROPERTIES|;|$)", local.sql_content)[0], "")
   columns_raw   = try(regexall("(?im)^\\s*(\\w+)\\s+(\\w+(?:\\([^)]*\\))?)\\s*(?:COMMENT\\s+'([^']*)')?,?\\s*$", local.columns_block), [])
   columns = [
     for c in local.columns_raw : {
