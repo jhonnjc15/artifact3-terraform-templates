@@ -1,16 +1,28 @@
 locals {
   sql_content = try(var.athena.sql_path, null) != null ? file(var.athena.sql_path) : null
 
-  database_name = try(regex("(?i)exists\\s+(\\w+)\\.", local.sql_content)[0], "default")
-  table_name    = try(regex("(?i)exists\\s+\\w+\\.(\\w+)", local.sql_content)[0], null)
-  s3_location   = try(regex("(?i)location\\s+'([^']+)'", local.sql_content)[0], null)
+  # Auto-detectar operación: CREATE TABLE vs ALTER TABLE
+  is_create = try(length(regexall("(?i)\\bCREATE\\s+(EXTERNAL\\s+)?TABLE\\b", local.sql_content)) > 0, false)
+  is_alter  = try(length(regexall("(?i)\\bALTER\\s+TABLE\\b", local.sql_content)) > 0, false)
+  operation = local.is_alter ? "ALTER" : "CREATE"
 
+  # Extraer database_name y table_name del SQL
+  # CREATE: ...EXISTS db.table... o TABLE db.table
+  # ALTER: TABLE db.table...
+  database_name = try(regex("(?i)(?:exists\\s+|table\\s+)(\\w+)\\.", local.sql_content)[0], "default")
+  table_name    = try(regex("(?i)(?:exists\\s+|table\\s+)\\w+\\.(\\w+)", local.sql_content)[0], null)
+
+  # s3_location y table_type vienen del config (deploy.json), no del SQL
+  s3_location = try(var.athena.s3_location, null)
+  table_type  = try(var.athena.table_type, "EXTERNAL_TABLE")
+  is_iceberg  = local.table_type == "ICEBERG"
+
+  # SerDe / formats (parseados del SQL, usados solo para CREATE)
   serde_library = try(regex("(?i)SERDE\\s+'([^']+)'", local.sql_content)[0], "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe")
   input_format  = try(regex("(?i)INPUTFORMAT\\s+'([^']+)'", local.sql_content)[0], "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat")
   output_format = try(regex("(?i)OUTPUTFORMAT\\s+'([^']+)'", local.sql_content)[0], "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat")
-  table_type    = try(regex("(?i)'table_type'\\s*=\\s*'(\\w+)'", local.sql_content)[0], "EXTERNAL_TABLE")
-  is_iceberg    = local.table_type == "ICEBERG"
 
+  # Parsear columnas del SQL (aplica tanto para CREATE como ALTER)
   columns_block = try(regex("(?si)\\(\\s*(.+?)\\s*\\)\\s*(?:PARTITIONED|ROW|STORED|LOCATION|TBLPROPERTIES)", local.sql_content)[0], "")
   columns_raw   = try(regexall("(?im)^\\s*(\\w+)\\s+(\\w+(?:\\([^)]*\\))?)\\s*(?:COMMENT\\s+'([^']*)')?,?\\s*$", local.columns_block), [])
   columns = [
@@ -21,6 +33,7 @@ locals {
     }
   ]
 
+  # Parsear partition keys
   partition_block = try(regex("(?si)PARTITIONED\\s+BY\\s+\\((.+?)\\)", local.sql_content)[0], "")
   partitions_raw  = try(regexall("(?im)^\\s*(\\w+)\\s+(\\w+(?:\\([^)]*\\))?)", local.partition_block), [])
   partition_keys = [
@@ -30,20 +43,56 @@ locals {
     }
   ]
 
-  infer_schema = try(var.athena.infer_schema, false)
-
   description = try(var.athena.description, "Tabla gestionada por Terraform")
 }
 
+# Leer tabla existente desde AWS (solo para operación ALTER)
+data "aws_glue_catalog_table" "existing" {
+  count = local.operation == "ALTER" ? 1 : 0
+
+  name          = local.table_name
+  database_name = local.database_name
+}
+
+locals {
+  # Columnas existentes desde AWS
+  existing_cols = local.operation == "ALTER" ? [
+    for c in data.aws_glue_catalog_table.existing[0].storage_descriptor[0].columns : {
+      name    = c.name
+      type    = c.type
+      comment = try(c.comment, null)
+    }
+  ] : []
+
+  existing_col_names = toset([for c in local.existing_cols : c.name])
+
+  # Solo columnas nuevas (evitar duplicados en ALTER)
+  columns_to_add = local.operation == "ALTER" ? [
+    for c in local.columns : c if !contains(local.existing_col_names, c.name)
+  ] : []
+
+  # CREATE: columnas del SQL
+  # ALTER: existentes + nuevas
+  final_columns = local.operation == "ALTER" ? concat(local.existing_cols, local.columns_to_add) : local.columns
+
+  # Partition keys: existentes + nuevas (para ALTER)
+  existing_parts = local.operation == "ALTER" ? try(data.aws_glue_catalog_table.existing[0].partition_keys, []) : []
+  existing_part_names = toset([for p in local.existing_parts : p.name])
+  parts_to_add = [for p in local.partition_keys : p if !contains(local.existing_part_names, p.name)]
+  final_partition_keys = local.operation == "ALTER" ? concat(local.existing_parts, local.parts_to_add) : local.partition_keys
+}
+
+# Base de datos (solo para CREATE)
 resource "aws_glue_catalog_database" "this" {
-  count = try(var.athena.enabled, false) ? 1 : 0
+  count = try(var.athena.enabled, false) && local.operation == "CREATE" ? 1 : 0
 
   name        = local.database_name
-  description = try(var.athena.description, "Base de datos para tablas Athena")
+  description = local.description
 
   tags = var.tags
 }
 
+# Tabla Glue
 resource "aws_glue_catalog_table" "this" {
   count = try(var.athena.enabled, false) && local.table_name != null ? 1 : 0
 
@@ -70,7 +119,7 @@ resource "aws_glue_catalog_table" "this" {
     }
 
     dynamic "columns" {
-      for_each = local.infer_schema ? [] : local.columns
+      for_each = local.final_columns
       content {
         name    = columns.value.name
         type    = columns.value.type
@@ -80,7 +129,7 @@ resource "aws_glue_catalog_table" "this" {
   }
 
   dynamic "partition_keys" {
-    for_each = local.partition_keys
+    for_each = local.final_partition_keys
     content {
       name = partition_keys.value.name
       type = partition_keys.value.type
