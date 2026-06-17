@@ -86,9 +86,18 @@ locals {
 
   existing_renamed_names = toset([for c in local.existing_renamed : c.name])
 
-  # Agregar columnas del SQL que no existan (aditivo)
+  # Aplicar drop/rename a las columnas del SQL también
+  sql_dropped   = [for c in local.columns : c if !contains(local.drop_cols, c.name)]
+  sql_renamed   = [for c in local.sql_dropped : {
+    name    = try(local.rename_map[c.name], c.name)
+    type    = c.type
+    comment = c.comment
+  }]
+  sql_renamed_names = toset([for c in local.sql_renamed : c.name])
+
+  # Agregar columnas del SQL (transformado) que no existan (aditivo)
   columns_to_add = [
-    for c in local.columns : c if !contains(local.existing_renamed_names, c.name)
+    for c in local.sql_renamed : c if !contains(local.existing_renamed_names, c.name)
   ]
 
   # Merge final = existentes (procesadas) + nuevas
