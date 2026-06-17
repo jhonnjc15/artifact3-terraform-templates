@@ -52,45 +52,58 @@ locals {
   description = try(var.athena.description, "Tabla gestionada por Terraform")
 }
 
-# Leer tabla existente desde AWS (solo para operación ALTER)
+# Leer tabla existente desde AWS (siempre, para merge aditivo)
 data "aws_glue_catalog_table" "existing" {
-  count = local.operation == "ALTER" ? 1 : 0
+  count = local.table_name != null ? 1 : 0
 
   name          = local.table_name
   database_name = local.database_name
 }
 
 locals {
-  # Columnas existentes desde AWS
-  existing_cols = local.operation == "ALTER" ? [
+  # Columnas existentes desde AWS (try para primer deploy cuando tabla no existe)
+  existing_cols = try([
     for c in data.aws_glue_catalog_table.existing[0].storage_descriptor[0].columns : {
       name    = c.name
       type    = c.type
       comment = try(c.comment, null)
     }
-  ] : []
+  ], [])
 
-  existing_col_names = toset([for c in local.existing_cols : c.name])
+  # Drop/Rename desde deploy.json
+  drop_cols   = try(var.athena.column_operations.drop, [])
+  rename_map  = try(var.athena.column_operations.rename, {})
 
-  # Solo columnas nuevas (evitar duplicados en ALTER)
-  columns_to_add = local.operation == "ALTER" ? [
-    for c in local.columns : c if !contains(local.existing_col_names, c.name)
-  ] : []
+  # Aplicar drops sobre existentes
+  existing_dropped = [for c in local.existing_cols : c if !contains(local.drop_cols, c.name)]
 
-  # CREATE: columnas del SQL
-  # ALTER: existentes + nuevas
-  final_columns = local.operation == "ALTER" ? concat(local.existing_cols, local.columns_to_add) : local.columns
+  # Aplicar renames sobre existentes (después de drops)
+  existing_renamed = [for c in local.existing_dropped : {
+    name    = try(local.rename_map[c.name], c.name)
+    type    = c.type
+    comment = c.comment
+  }]
 
-  # Partition keys: existentes + nuevas (para ALTER)
-  existing_parts = local.operation == "ALTER" ? try(data.aws_glue_catalog_table.existing[0].partition_keys, []) : []
+  existing_renamed_names = toset([for c in local.existing_renamed : c.name])
+
+  # Agregar columnas del SQL que no existan (aditivo)
+  columns_to_add = [
+    for c in local.columns : c if !contains(local.existing_renamed_names, c.name)
+  ]
+
+  # Merge final = existentes (procesadas) + nuevas
+  final_columns = concat(local.existing_renamed, local.columns_to_add)
+
+  # Partition keys: existentes + nuevas
+  existing_parts = try(data.aws_glue_catalog_table.existing[0].partition_keys, [])
   existing_part_names = toset([for p in local.existing_parts : p.name])
   parts_to_add = [for p in local.partition_keys : p if !contains(local.existing_part_names, p.name)]
-  final_partition_keys = local.operation == "ALTER" ? concat(local.existing_parts, local.parts_to_add) : local.partition_keys
+  final_partition_keys = concat(local.existing_parts, local.parts_to_add)
 
-  # Preservar metadata existente para operación ALTER
-  existing_params     = local.operation == "ALTER" ? try(data.aws_glue_catalog_table.existing[0].parameters, {}) : {}
-  existing_location   = local.operation == "ALTER" ? try(data.aws_glue_catalog_table.existing[0].storage_descriptor[0].location, null) : null
-  existing_table_type = local.operation == "ALTER" ? try(data.aws_glue_catalog_table.existing[0].table_type, "EXTERNAL_TABLE") : "EXTERNAL_TABLE"
+  # Preservar metadata existente (con fallback a valores del SQL)
+  existing_params     = try(data.aws_glue_catalog_table.existing[0].parameters, {})
+  existing_location   = try(data.aws_glue_catalog_table.existing[0].storage_descriptor[0].location, null)
+  existing_table_type = try(data.aws_glue_catalog_table.existing[0].table_type, "EXTERNAL_TABLE")
 }
 
 # Base de datos (siempre activa si enabled, no depende de CREATE/ALTER)
@@ -119,7 +132,7 @@ resource "aws_glue_catalog_table" "this" {
   )
 
   storage_descriptor {
-    location      = local.operation == "ALTER" ? local.existing_location : local.s3_location
+    location      = local.s3_location
     input_format  = local.is_iceberg ? "org.apache.hadoop.hive.ql.io.iceberg.delegate.IcebergInputFormat" : local.input_format
     output_format = local.is_iceberg ? "org.apache.hadoop.hive.ql.io.iceberg.delegate.IcebergOutputFormat" : local.output_format
 
