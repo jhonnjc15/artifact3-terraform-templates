@@ -12,10 +12,16 @@ locals {
   database_name = try(regex("(?i)(?:exists\\s+|table\\s+)(\\w+)\\.", local.sql_content)[0], "default")
   table_name    = try(regex("(?i)(?:exists\\s+|table\\s+)\\w+\\.(\\w+)", local.sql_content)[0], null)
 
-  # s3_location y table_type vienen del config (deploy.json), no del SQL
-  s3_location = try(var.athena.s3_location, null)
-  table_type  = try(var.athena.table_type, "EXTERNAL_TABLE")
-  is_iceberg  = local.table_type == "ICEBERG"
+  # Parsear todas las TBLPROPERTIES del SQL
+  tblproperties_raw = try(regexall("(?im)'([^']+)'\\s*=\\s*'([^']*)'", local.sql_content), [])
+  tblproperties     = { for kv in local.tblproperties_raw : kv[0] => kv[1] }
+
+  # s3_location: prioridad deploy.json → SQL → null
+  s3_location = try(var.athena.s3_location, try(regex("(?i)location\\s+'([^']+)'", local.sql_content)[0], null))
+
+  # table_type: prioridad deploy.json → TBLPROPERTIES del SQL → default
+  table_type = try(var.athena.table_type, try(local.tblproperties["table_type"], "EXTERNAL_TABLE"))
+  is_iceberg = local.table_type == "ICEBERG"
 
   # SerDe / formats (parseados del SQL, usados solo para CREATE)
   serde_library = try(regex("(?i)SERDE\\s+'([^']+)'", local.sql_content)[0], "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe")
@@ -102,10 +108,7 @@ resource "aws_glue_catalog_table" "this" {
   table_type    = local.is_iceberg ? "ICEBERG" : "EXTERNAL_TABLE"
 
   parameters = merge(
-    {
-      classification = "parquet"
-      table_type     = local.table_type
-    },
+    local.tblproperties,
     try(var.athena.parameters, {})
   )
 
