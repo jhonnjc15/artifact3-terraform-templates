@@ -30,6 +30,8 @@ locals {
     }
   ]
 
+  infer_schema = try(var.athena.infer_schema, false)
+
   description = try(var.athena.description, "Tabla gestionada por Terraform")
 }
 
@@ -68,7 +70,7 @@ resource "aws_glue_catalog_table" "this" {
     }
 
     dynamic "columns" {
-      for_each = local.columns
+      for_each = local.infer_schema ? [] : local.columns
       content {
         name    = columns.value.name
         type    = columns.value.type
