@@ -86,6 +86,11 @@ locals {
   existing_part_names = toset([for p in local.existing_parts : p.name])
   parts_to_add = [for p in local.partition_keys : p if !contains(local.existing_part_names, p.name)]
   final_partition_keys = local.operation == "ALTER" ? concat(local.existing_parts, local.parts_to_add) : local.partition_keys
+
+  # Preservar metadata existente para operación ALTER
+  existing_params     = local.operation == "ALTER" ? try(data.aws_glue_catalog_table.existing[0].parameters, {}) : {}
+  existing_location   = local.operation == "ALTER" ? try(data.aws_glue_catalog_table.existing[0].storage_descriptor[0].location, null) : null
+  existing_table_type = local.operation == "ALTER" ? try(data.aws_glue_catalog_table.existing[0].table_type, "EXTERNAL_TABLE") : "EXTERNAL_TABLE"
 }
 
 # Base de datos (siempre activa si enabled, no depende de CREATE/ALTER)
@@ -105,15 +110,16 @@ resource "aws_glue_catalog_table" "this" {
   name          = local.table_name
   database_name = local.database_name
   description   = local.description
-  table_type    = local.is_iceberg ? "ICEBERG" : "EXTERNAL_TABLE"
+  table_type    = local.is_iceberg ? "ICEBERG" : local.existing_table_type
 
   parameters = merge(
+    local.existing_params,
     local.tblproperties,
     try(var.athena.parameters, {})
   )
 
   storage_descriptor {
-    location      = local.s3_location
+    location      = local.operation == "ALTER" ? local.existing_location : local.s3_location
     input_format  = local.is_iceberg ? "org.apache.hadoop.hive.ql.io.iceberg.delegate.IcebergInputFormat" : local.input_format
     output_format = local.is_iceberg ? "org.apache.hadoop.hive.ql.io.iceberg.delegate.IcebergOutputFormat" : local.output_format
 
