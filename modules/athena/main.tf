@@ -54,7 +54,7 @@ locals {
 
 # Leer tabla existente desde AWS (siempre, para merge aditivo)
 data "aws_glue_catalog_table" "existing" {
-  count = local.table_name != null && try(var.athena.read_existing, false) ? 1 : 0
+  count = local.table_name != null && try(var.athena.merge_existing, false) ? 1 : 0
 
   name          = local.table_name
   database_name = local.database_name
