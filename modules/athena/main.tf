@@ -6,18 +6,21 @@ locals {
   is_alter  = try(length(regexall("(?i)\\bALTER\\s+TABLE\\b", local.sql_content)) > 0, false)
   operation = local.is_alter ? "ALTER" : "CREATE"
 
-  # Extraer database_name y table_name del SQL
+  # Extraer valores base del SQL
   # CREATE: ...EXISTS db.table... o TABLE db.table
   # ALTER: TABLE db.table...
-  database_name = try(regex("(?i)(?:exists\\s+|table\\s+)(\\w+)\\.", local.sql_content)[0], "default")
-  table_name    = try(regex("(?i)(?:exists\\s+|table\\s+)\\w+\\.(\\w+)", local.sql_content)[0], null)
+  sql_database_name = try(regex("(?i)(?:exists\\s+|table\\s+)(\\w+)\\.", local.sql_content)[0], "default")
+  sql_table_name    = try(regex("(?i)(?:exists\\s+|table\\s+)\\w+\\.(\\w+)", local.sql_content)[0], null)
+  sql_s3_location   = try(regex("(?i)location\\s+'([^']+)'", local.sql_content)[0], null)
+
+  # Valores finales: prioridad deploy.json -> SQL
+  database_name = try(trimspace(var.athena.database_name), "") != "" ? trimspace(var.athena.database_name) : local.sql_database_name
+  table_name    = try(trimspace(var.athena.table_name), "") != "" ? trimspace(var.athena.table_name) : local.sql_table_name
+  s3_location   = try(trimspace(var.athena.s3_location), "") != "" ? trimspace(var.athena.s3_location) : local.sql_s3_location
 
   # Parsear todas las TBLPROPERTIES del SQL
   tblproperties_raw = try(regexall("(?im)'([^']+)'\\s*=\\s*'([^']*)'", local.sql_content), [])
   tblproperties     = { for kv in local.tblproperties_raw : kv[0] => kv[1] }
-
-  # s3_location: prioridad deploy.json → SQL → null
-  s3_location = try(var.athena.s3_location, try(regex("(?i)location\\s+'([^']+)'", local.sql_content)[0], null))
 
   # table_type: prioridad deploy.json → TBLPROPERTIES del SQL → default
   table_type = try(var.athena.table_type, try(local.tblproperties["table_type"], "EXTERNAL_TABLE"))
@@ -71,8 +74,8 @@ locals {
   ], [])
 
   # Drop/Rename desde deploy.json
-  drop_cols   = try(var.athena.column_operations.drop, [])
-  rename_map  = try(var.athena.column_operations.rename, {})
+  drop_cols  = try(var.athena.column_operations.drop, [])
+  rename_map = try(var.athena.column_operations.rename, {})
 
   # Aplicar drops sobre existentes
   existing_dropped = [for c in local.existing_cols : c if !contains(local.drop_cols, c.name)]
@@ -87,8 +90,8 @@ locals {
   existing_renamed_names = toset([for c in local.existing_renamed : c.name])
 
   # Aplicar drop/rename a las columnas del SQL también
-  sql_dropped   = [for c in local.columns : c if !contains(local.drop_cols, c.name)]
-  sql_renamed   = [for c in local.sql_dropped : {
+  sql_dropped = [for c in local.columns : c if !contains(local.drop_cols, c.name)]
+  sql_renamed = [for c in local.sql_dropped : {
     name    = try(local.rename_map[c.name], c.name)
     type    = c.type
     comment = c.comment
@@ -104,9 +107,9 @@ locals {
   final_columns = concat(local.existing_renamed, local.columns_to_add)
 
   # Partition keys: existentes + nuevas
-  existing_parts = try(data.aws_glue_catalog_table.existing[0].partition_keys, [])
-  existing_part_names = toset([for p in local.existing_parts : p.name])
-  parts_to_add = [for p in local.partition_keys : p if !contains(local.existing_part_names, p.name)]
+  existing_parts       = try(data.aws_glue_catalog_table.existing[0].partition_keys, [])
+  existing_part_names  = toset([for p in local.existing_parts : p.name])
+  parts_to_add         = [for p in local.partition_keys : p if !contains(local.existing_part_names, p.name)]
   final_partition_keys = concat(local.existing_parts, local.parts_to_add)
 
   # Preservar metadata existente (con fallback a valores del SQL)

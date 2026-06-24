@@ -1,5 +1,5 @@
 variable "athena" {
-  description = "Configuración del query Athena. Objeto con: enabled, sql_path. database_name se extrae automáticamente del SQL."
+  description = "Configuración Athena. database_name, table_name y s3_location pueden venir como override; si no, se extraen del SQL."
   type        = any
   default     = {}
 }
