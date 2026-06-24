@@ -2,12 +2,12 @@ locals {
   clean_scripts_prefix = trim(var.scripts_prefix, "/")
 
   base_default_arguments = {
-    "--TempDir"                           = "s3://${var.temp_bucket}/temporary/"
-    "--job-language"                      = "python"
-    "--enable-metrics"                    = "true"
-    "--enable-glue-datacatalog"           = "true"
-    "--enable-continuous-cloudwatch-log"  = "true"
-    "--conf"                              = "spark.eventLog.rolling.enabled=true"
+    "--TempDir"                          = "s3://${var.temp_bucket}/temporary/"
+    "--job-language"                     = "python"
+    "--enable-metrics"                   = "true"
+    "--enable-glue-datacatalog"          = "true"
+    "--enable-continuous-cloudwatch-log" = "true"
+    "--conf"                             = "spark.eventLog.rolling.enabled=true"
   }
 }
 
@@ -15,7 +15,7 @@ resource "aws_s3_object" "glue_script" {
   for_each = var.glue_jobs
 
   bucket = var.artifact_bucket
-  key = try(each.value.script_s3_key, "${local.clean_scripts_prefix}/${each.key}/${basename(each.value.script_local_path)}")
+  key    = try(each.value.script_s3_key, "${local.clean_scripts_prefix}/${each.key}/${basename(each.value.script_local_path)}")
   source = each.value.script_local_path
   etag   = filemd5(each.value.script_local_path)
 
