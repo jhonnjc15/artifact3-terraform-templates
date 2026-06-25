@@ -64,7 +64,7 @@ for lambda_entry in "${LAMBDAS[@]}"; do
 
   case "$runtime" in
     python*)
-      python -m compileall -q "$source_path"
+      PYTHONDONTWRITEBYTECODE=1 python -m py_compile $(find "$source_path" -name "*.py")
       if command -v flake8 >/dev/null 2>&1; then
         flake8 "$source_path" --select=E9,F63,F7,F82
       else
