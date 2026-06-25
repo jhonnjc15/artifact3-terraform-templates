@@ -64,13 +64,30 @@ for lambda_entry in "${LAMBDAS[@]}"; do
 
   case "$runtime" in
     python*)
-      PYTHONDONTWRITEBYTECODE=1 python -m py_compile $(find "$source_path" -name "*.py")
+      find "$source_path" -type d -name "__pycache__" -prune -exec rm -rf {} +
+      find "$source_path" -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete
+      python - "$source_path" <<'PY'
+import ast
+import pathlib
+import sys
+
+source_path = pathlib.Path(sys.argv[1])
+python_files = list(source_path.rglob("*.py")) if source_path.is_dir() else [source_path]
+
+if not python_files:
+    raise SystemExit(f"ERROR: no Python files found in {source_path}")
+
+for path in python_files:
+    ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+PY
       if command -v flake8 >/dev/null 2>&1; then
         flake8 "$source_path" --select=E9,F63,F7,F82
       else
         echo "ERROR: flake8 is required for Python Lambda lint validation." >&2
         exit 1
       fi
+      find "$source_path" -type d -name "__pycache__" -prune -exec rm -rf {} +
+      find "$source_path" -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete
       ;;
     nodejs*)
       if command -v npx >/dev/null 2>&1; then
