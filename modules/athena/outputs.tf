@@ -1,6 +1,6 @@
 output "database_name" {
-  description = "Nombre de la base de datos Glue creada."
-  value       = try(aws_glue_catalog_database.this[0].name, null)
+  description = "Nombre de la base de datos Glue donde se crea la tabla."
+  value       = local.database_name
 }
 
 output "table_name" {

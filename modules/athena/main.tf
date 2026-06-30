@@ -118,17 +118,8 @@ locals {
   existing_table_type = try(data.aws_glue_catalog_table.existing[0].table_type, "EXTERNAL_TABLE")
 }
 
-# Base de datos (siempre activa si enabled, no depende de CREATE/ALTER)
-resource "aws_glue_catalog_database" "this" {
-  count = try(var.athena.enabled, false) ? 1 : 0
-
-  name        = local.database_name
-  description = local.description
-
-  tags = var.tags
-}
-
-# Tabla Glue
+# Tabla Glue. La base de datos se gestiona en el root/consumer mediante el bloque
+# databases del deploy.json, para permitir muchas tablas en una misma DB.
 resource "aws_glue_catalog_table" "this" {
   count = try(var.athena.enabled, false) && local.table_name != null ? 1 : 0
 
@@ -180,5 +171,4 @@ resource "aws_glue_catalog_table" "this" {
     }
   }
 
-  depends_on = [aws_glue_catalog_database.this]
 }

@@ -2,10 +2,12 @@
 
 Repositorio central de templates Terraform para el Artefacto 3.
 
+Guia funcional detallada: [`DOCUMENTO_FUNCIONAL.md`](DOCUMENTO_FUNCIONAL.md).
+
 Módulos disponibles:
 
 - `glue_job` — Crea AWS Glue Jobs con scripts subidos a S3.
-- `athena` — Crea base de datos Glue, workgroup Athena y registra named queries desde archivos SQL.
+- `athena` — Crea tablas Glue/Athena desde archivos SQL. La base de datos se gestiona desde el repo consumidor mediante el bloque `databases`.
 - `lambda` — Empaqueta código Lambda desde un directorio, lo sube a S3 y crea la función.
 
 ## Estructura
@@ -17,7 +19,8 @@ artifact3-terraform-templates/
     │   ├── main.tf
     │   ├── variables.tf
     │   ├── outputs.tf
-    │   └── versions.tf
+    │   ├── versions.tf
+    │   └── validations/validate.sh
     ├── athena/
     │   ├── main.tf
     │   ├── variables.tf
@@ -27,7 +30,8 @@ artifact3-terraform-templates/
         ├── main.tf
         ├── variables.tf
         ├── outputs.tf
-        └── versions.tf
+        ├── versions.tf
+        └── validations/validate.sh
 ```
 
 ## Uso
@@ -50,3 +54,20 @@ module "lambda" {
   ...
 }
 ```
+
+Para consumers productivos se recomienda usar tags versionados en lugar de `ref=main`.
+
+## Validaciones
+
+Las validaciones reutilizables viven en los modulos y se ejecutan desde el workflow del repo consumidor antes de `terraform init`.
+
+| Modulo | Script | Valida |
+|---|---|---|
+| `glue_job` | `modules/glue_job/validations/validate.sh` | Sintaxis Python, lint critico, `GlueContext`, lectura, escritura y `try/except` |
+| `lambda` | `modules/lambda/validations/validate.sh` | `source_path`, `timeout`, `memory_size`, lint/sintaxis y escaneo basico de secretos |
+
+## Notas de diseno
+
+- El modulo `athena` prioriza valores del consumer sobre valores parseados del SQL.
+- El modulo `lambda` usa hash deterministico de archivos fuente para evitar cambios por ZIP no deterministico.
+- Los modulos no ejecutan validaciones con `local-exec`; esa responsabilidad queda en CI/CD.
