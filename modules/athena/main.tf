@@ -22,9 +22,9 @@ locals {
   tblproperties_raw = try(regexall("(?im)'([^']+)'\\s*=\\s*'([^']*)'", local.sql_content), [])
   tblproperties     = { for kv in local.tblproperties_raw : kv[0] => kv[1] }
 
-  # table_type: prioridad deploy.json → TBLPROPERTIES del SQL → default
-  table_type = try(var.athena.table_type, try(local.tblproperties["table_type"], "EXTERNAL_TABLE"))
-  is_iceberg = local.table_type == "ICEBERG"
+  reserved_table_parameters = toset([
+    "table_type",
+  ])
 
   # SerDe / formats (parseados del SQL, usados solo para CREATE)
   serde_library = try(regex("(?i)SERDE\\s+'([^']+)'", local.sql_content)[0], "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe")
@@ -113,9 +113,17 @@ locals {
   final_partition_keys = concat(local.existing_parts, local.parts_to_add)
 
   # Preservar metadata existente (con fallback a valores del SQL)
-  existing_params     = try(data.aws_glue_catalog_table.existing[0].parameters, {})
-  existing_location   = try(data.aws_glue_catalog_table.existing[0].storage_descriptor[0].location, null)
-  existing_table_type = try(data.aws_glue_catalog_table.existing[0].table_type, "EXTERNAL_TABLE")
+  existing_params   = try(data.aws_glue_catalog_table.existing[0].parameters, {})
+  existing_location = try(data.aws_glue_catalog_table.existing[0].storage_descriptor[0].location, null)
+
+  table_parameters = {
+    for key, value in merge(
+      local.existing_params,
+      local.tblproperties,
+      try(var.athena.parameters, {})
+    ) : key => value
+    if !contains(local.reserved_table_parameters, key)
+  }
 }
 
 # Tabla Glue. La base de datos se gestiona en el root/consumer mediante el bloque
@@ -126,21 +134,17 @@ resource "aws_glue_catalog_table" "this" {
   name          = local.table_name
   database_name = local.database_name
   description   = local.description
-  table_type    = local.is_iceberg ? "ICEBERG" : local.existing_table_type
+  table_type    = "EXTERNAL_TABLE"
 
-  parameters = merge(
-    local.existing_params,
-    local.tblproperties,
-    try(var.athena.parameters, {})
-  )
+  parameters = local.table_parameters
 
   storage_descriptor {
     location      = local.s3_location
-    input_format  = local.is_iceberg ? "org.apache.hadoop.hive.ql.io.iceberg.delegate.IcebergInputFormat" : local.input_format
-    output_format = local.is_iceberg ? "org.apache.hadoop.hive.ql.io.iceberg.delegate.IcebergOutputFormat" : local.output_format
+    input_format  = local.input_format
+    output_format = local.output_format
 
     ser_de_info {
-      serialization_library = local.is_iceberg ? "org.apache.hadoop.hive.ql.io.iceberg.delegate.IcebergSerDe" : local.serde_library
+      serialization_library = local.serde_library
     }
 
     dynamic "columns" {
@@ -160,15 +164,4 @@ resource "aws_glue_catalog_table" "this" {
       type = partition_keys.value.type
     }
   }
-
-  dynamic "open_table_format_input" {
-    for_each = local.is_iceberg ? [1] : []
-    content {
-      iceberg_input {
-        metadata_operation = "CREATE"
-        version            = 2
-      }
-    }
-  }
-
 }

@@ -7,7 +7,7 @@ Guia funcional detallada: [`DOCUMENTO_FUNCIONAL.md`](DOCUMENTO_FUNCIONAL.md).
 Módulos disponibles:
 
 - `glue_job` — Crea AWS Glue Jobs con scripts subidos a S3.
-- `athena` — Crea tablas Glue/Athena desde archivos SQL. La base de datos se gestiona desde el repo consumidor mediante el bloque `databases`.
+- `athena` — Crea tablas Glue/Athena `EXTERNAL_TABLE` desde archivos SQL. La base de datos se gestiona desde el repo consumidor mediante el bloque `databases`.
 - `lambda` — Empaqueta código Lambda desde un directorio, lo sube a S3 y crea la función.
 
 ## Estructura

@@ -68,7 +68,7 @@ Campos esperados o soportados:
 | `table_name` | Override opcional de tabla |
 | `s3_location` | Override opcional de ubicacion S3 |
 | `description` | Descripcion de database/table |
-| `table_type` | Tipo de tabla, incluido soporte Iceberg basico |
+| `table_type` | No usar en el manifest; el modulo gestiona tablas Glue/Athena `EXTERNAL_TABLE` |
 | `parameters` | Parametros adicionales de tabla |
 | `merge_existing` | Lee tabla existente para merge aditivo |
 | `column_operations.drop` | Elimina columnas del modelo final |
